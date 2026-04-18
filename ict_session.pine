@@ -1,0 +1,440 @@
+//@version=6
+indicator("ICT session", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+const string GROUP_GENERAL = "General"
+const string GROUP_KILLZONES = "Killzones"
+const string GROUP_SESSION_LEVELS = "Session High/Low"
+const string GROUP_PREVIOUS_LEVELS = "Previous High/Low"
+
+string timeframeLimitInput = input.timeframe("30", "Timeframe limit", group = GROUP_GENERAL)
+string timezoneInput = input.string("America/New_York", "Timezone", group = GROUP_GENERAL, tooltip = "Use an IANA timezone such as America/New_York, UTC, or Asia/Bangkok.")
+string labelSizeInput = input.string("Normal", "Label size", options = ["Tiny", "Small", "Normal", "Large"], group = GROUP_GENERAL)
+string labelPositionInput = input.string("Bottom", "Label position", options = ["Top", "Center", "Bottom"], group = GROUP_GENERAL)
+color textColorInput = input.color(color.rgb(55, 65, 81), "Text color", group = GROUP_GENERAL)
+int boxesToKeepInput = input.int(80, "Session boxes to keep", minval = 5, maxval = 480, group = GROUP_GENERAL)
+
+bool showBoxesInput = input.bool(true, "Show session boxes", inline = "show", group = GROUP_KILLZONES)
+bool displayTextInput = input.bool(true, "Display text", inline = "show", group = GROUP_KILLZONES)
+
+bool showAsiaInput = input.bool(true, "", inline = "asia", group = GROUP_KILLZONES)
+string asiaNameInput = input.string("Asia", "", inline = "asia", group = GROUP_KILLZONES)
+string asiaSessionInput = input.session("2000-0000", "", inline = "asia", group = GROUP_KILLZONES)
+color asiaColorInput = input.color(color.rgb(37, 99, 235), "", inline = "asia", group = GROUP_KILLZONES)
+
+bool showLondonInput = input.bool(true, "", inline = "london", group = GROUP_KILLZONES)
+string londonNameInput = input.string("London", "", inline = "london", group = GROUP_KILLZONES)
+string londonSessionInput = input.session("0200-0500", "", inline = "london", group = GROUP_KILLZONES)
+color londonColorInput = input.color(color.rgb(225, 29, 72), "", inline = "london", group = GROUP_KILLZONES)
+
+bool showNewYorkAmInput = input.bool(true, "", inline = "nyam", group = GROUP_KILLZONES)
+string newYorkAmNameInput = input.string("NY AM", "", inline = "nyam", group = GROUP_KILLZONES)
+string newYorkAmSessionInput = input.session("0930-1100", "", inline = "nyam", group = GROUP_KILLZONES)
+color newYorkAmColorInput = input.color(color.rgb(13, 148, 136), "", inline = "nyam", group = GROUP_KILLZONES)
+
+bool showNewYorkLunchInput = input.bool(true, "", inline = "nylunch", group = GROUP_KILLZONES)
+string newYorkLunchNameInput = input.string("NY Lunch", "", inline = "nylunch", group = GROUP_KILLZONES)
+string newYorkLunchSessionInput = input.session("1200-1300", "", inline = "nylunch", group = GROUP_KILLZONES)
+color newYorkLunchColorInput = input.color(color.rgb(250, 204, 21), "", inline = "nylunch", group = GROUP_KILLZONES)
+
+bool showNewYorkPmInput = input.bool(true, "", inline = "nypm", group = GROUP_KILLZONES)
+string newYorkPmNameInput = input.string("NY PM", "", inline = "nypm", group = GROUP_KILLZONES)
+string newYorkPmSessionInput = input.session("1330-1600", "", inline = "nypm", group = GROUP_KILLZONES)
+color newYorkPmColorInput = input.color(color.rgb(147, 51, 234), "", inline = "nypm", group = GROUP_KILLZONES)
+
+int boxTransparencyInput = input.int(70, "Box transparency", minval = 0, maxval = 100, group = GROUP_KILLZONES)
+int textTransparencyInput = input.int(50, "Text transparency", minval = 0, maxval = 100, group = GROUP_KILLZONES)
+
+bool showSessionLevelsInput = input.bool(true, "Show pivots", inline = "sessionLevels", group = GROUP_SESSION_LEVELS)
+bool displaySessionLevelTextInput = input.bool(true, "Show pivot labels", inline = "sessionLevels", group = GROUP_SESSION_LEVELS)
+string sessionLevelLabelSideInput = input.string("Right Side", "Label side", options = ["Right Side", "Session Extremes"], group = GROUP_SESSION_LEVELS)
+string sessionLevelExtendModeInput = input.string("Until Mitigated", "Extend pivots", options = ["Until Mitigated", "Past Mitigation"], group = GROUP_SESSION_LEVELS)
+bool useSessionLevelCutoffInput = input.bool(false, "Drawing cutoff time", inline = "sessionCutoff", group = GROUP_SESSION_LEVELS)
+string sessionLevelCutoffInput = input.session("1800-1801", "", inline = "sessionCutoff", group = GROUP_SESSION_LEVELS)
+string sessionLevelStyleInput = input.string("Solid", "Style", options = ["Solid", "Dashed", "Dotted"], group = GROUP_SESSION_LEVELS)
+int sessionLevelLineWidthInput = input.int(2, "Line width", minval = 1, maxval = 5, group = GROUP_SESSION_LEVELS)
+int sessionLevelTransparencyInput = input.int(0, "Line transparency", minval = 0, maxval = 100, group = GROUP_SESSION_LEVELS)
+int sessionLevelsToKeepInput = input.int(80, "Session pivot sets to keep", minval = 5, maxval = 240, group = GROUP_SESSION_LEVELS)
+
+bool showPreviousDayInput = input.bool(true, "PDH/PDL", inline = "previousDay", group = GROUP_PREVIOUS_LEVELS)
+color previousDayColorInput = input.color(color.rgb(245, 158, 11), "", inline = "previousDay", group = GROUP_PREVIOUS_LEVELS)
+bool showPreviousWeekInput = input.bool(true, "PWH/PWL", inline = "previousWeek", group = GROUP_PREVIOUS_LEVELS)
+color previousWeekColorInput = input.color(color.rgb(99, 102, 241), "", inline = "previousWeek", group = GROUP_PREVIOUS_LEVELS)
+bool showPreviousMonthInput = input.bool(true, "PMH/PML", inline = "previousMonth", group = GROUP_PREVIOUS_LEVELS)
+color previousMonthColorInput = input.color(color.rgb(75, 85, 99), "", inline = "previousMonth", group = GROUP_PREVIOUS_LEVELS)
+bool displayPreviousLevelTextInput = input.bool(true, "Display labels", inline = "previousDisplay", group = GROUP_PREVIOUS_LEVELS)
+string previousLevelStyleInput = input.string("Dashed", "Style", options = ["Solid", "Dashed", "Dotted"], inline = "previousDisplay", group = GROUP_PREVIOUS_LEVELS)
+int previousLevelLineWidthInput = input.int(1, "Line width", minval = 1, maxval = 5, group = GROUP_PREVIOUS_LEVELS)
+int previousLevelTransparencyInput = input.int(0, "Line transparency", minval = 0, maxval = 100, group = GROUP_PREVIOUS_LEVELS)
+int previousLabelOffsetInput = input.int(2, "Label offset", minval = 0, maxval = 50, group = GROUP_PREVIOUS_LEVELS)
+
+const int SESSION_ASIA = 0
+const int SESSION_LONDON = 1
+const int SESSION_NY_AM = 2
+const int SESSION_NY_LUNCH = 3
+const int SESSION_NY_PM = 4
+
+const int PREV_PDH = 0
+const int PREV_PDL = 1
+const int PREV_PWH = 2
+const int PREV_PWL = 3
+const int PREV_PMH = 4
+const int PREV_PML = 5
+
+type sessionPivot
+    array<box> boxes
+    array<line> hiLines
+    array<line> loLines
+    array<label> hiLabels
+    array<label> loLabels
+    array<bool> hiValid
+    array<bool> loValid
+    bool sessionActive
+    float activeHigh
+    float activeLow
+    int activeHighTime
+    int activeLowTime
+    int activeRightTime
+
+var sessionPivot asiaSessionState = sessionPivot.new(array.new<box>(), array.new<line>(), array.new<line>(), array.new<label>(), array.new<label>(), array.new<bool>(), array.new<bool>(), false, na, na, na, na, na)
+var sessionPivot londonSessionState = sessionPivot.new(array.new<box>(), array.new<line>(), array.new<line>(), array.new<label>(), array.new<label>(), array.new<bool>(), array.new<bool>(), false, na, na, na, na, na)
+var sessionPivot newYorkAmSessionState = sessionPivot.new(array.new<box>(), array.new<line>(), array.new<line>(), array.new<label>(), array.new<label>(), array.new<bool>(), array.new<bool>(), false, na, na, na, na, na)
+var sessionPivot newYorkLunchSessionState = sessionPivot.new(array.new<box>(), array.new<line>(), array.new<line>(), array.new<label>(), array.new<label>(), array.new<bool>(), array.new<bool>(), false, na, na, na, na, na)
+var sessionPivot newYorkPmSessionState = sessionPivot.new(array.new<box>(), array.new<line>(), array.new<line>(), array.new<label>(), array.new<label>(), array.new<bool>(), array.new<bool>(), false, na, na, na, na, na)
+
+var array<int> sessionBoxOrder = array.new<int>()
+var array<int> sessionPivotOrder = array.new<int>()
+
+var array<line> previousLevelLines = array.new<line>(6, line(na))
+var array<label> previousLevelLabels = array.new<label>(6, label(na))
+
+string labelSize = switch labelSizeInput
+    "Tiny" => size.tiny
+    "Small" => size.small
+    "Large" => size.large
+    => size.normal
+
+string labelVerticalAlign = switch labelPositionInput
+    "Top" => text.align_top
+    "Center" => text.align_center
+    => text.align_bottom
+
+string sessionLevelStyle = switch sessionLevelStyleInput
+    "Dashed" => line.style_dashed
+    "Dotted" => line.style_dotted
+    => line.style_solid
+
+string previousLevelStyle = switch previousLevelStyleInput
+    "Solid" => line.style_solid
+    "Dotted" => line.style_dotted
+    => line.style_dashed
+
+bool timeframeAllowed = timeframe.isintraday and timeframe.in_seconds() <= timeframe.in_seconds(timeframeLimitInput)
+bool sessionLevelRightSide = sessionLevelLabelSideInput == "Right Side"
+bool sessionLevelsPastMitigation = sessionLevelExtendModeInput == "Past Mitigation"
+bool sessionLevelCutoffReached = useSessionLevelCutoffInput and not na(time("", sessionLevelCutoffInput, timezoneInput))
+
+float previousDayHigh = request.security(syminfo.tickerid, "D", high[1], barmerge.gaps_off, barmerge.lookahead_on)
+float previousDayLow = request.security(syminfo.tickerid, "D", low[1], barmerge.gaps_off, barmerge.lookahead_on)
+float previousWeekHigh = request.security(syminfo.tickerid, "W", high[1], barmerge.gaps_off, barmerge.lookahead_on)
+float previousWeekLow = request.security(syminfo.tickerid, "W", low[1], barmerge.gaps_off, barmerge.lookahead_on)
+float previousMonthHigh = request.security(syminfo.tickerid, "M", high[1], barmerge.gaps_off, barmerge.lookahead_on)
+float previousMonthLow = request.security(syminfo.tickerid, "M", low[1], barmerge.gaps_off, barmerge.lookahead_on)
+
+bool newDay = timeframe.change("D")
+bool newWeek = timeframe.change("W")
+bool newMonth = timeframe.change("M")
+
+method deleteOldestBox(sessionPivot this) =>
+    if array.size(this.boxes) > 0
+        box oldBox = array.pop(this.boxes)
+        if not na(oldBox)
+            box.delete(oldBox)
+    true
+
+method deleteOldestPivot(sessionPivot this) =>
+    if array.size(this.hiLines) > 0
+        line oldHiLine = array.pop(this.hiLines)
+        line oldLoLine = array.pop(this.loLines)
+        label oldHiLabel = array.pop(this.hiLabels)
+        label oldLoLabel = array.pop(this.loLabels)
+        array.pop(this.hiValid)
+        array.pop(this.loValid)
+
+        if not na(oldHiLine)
+            line.delete(oldHiLine)
+        if not na(oldLoLine)
+            line.delete(oldLoLine)
+        if not na(oldHiLabel)
+            label.delete(oldHiLabel)
+        if not na(oldLoLabel)
+            label.delete(oldLoLabel)
+    true
+
+deleteOldestSessionBox(int sessionId) =>
+    if sessionId == SESSION_ASIA
+        asiaSessionState.deleteOldestBox()
+    else if sessionId == SESSION_LONDON
+        londonSessionState.deleteOldestBox()
+    else if sessionId == SESSION_NY_AM
+        newYorkAmSessionState.deleteOldestBox()
+    else if sessionId == SESSION_NY_LUNCH
+        newYorkLunchSessionState.deleteOldestBox()
+    else if sessionId == SESSION_NY_PM
+        newYorkPmSessionState.deleteOldestBox()
+    true
+
+deleteOldestSessionPivot(int sessionId) =>
+    if sessionId == SESSION_ASIA
+        asiaSessionState.deleteOldestPivot()
+    else if sessionId == SESSION_LONDON
+        londonSessionState.deleteOldestPivot()
+    else if sessionId == SESSION_NY_AM
+        newYorkAmSessionState.deleteOldestPivot()
+    else if sessionId == SESSION_NY_LUNCH
+        newYorkLunchSessionState.deleteOldestPivot()
+    else if sessionId == SESSION_NY_PM
+        newYorkPmSessionState.deleteOldestPivot()
+    true
+
+trimSessionBoxes() =>
+    while array.size(sessionBoxOrder) > boxesToKeepInput
+        int oldSessionId = array.pop(sessionBoxOrder)
+        deleteOldestSessionBox(oldSessionId)
+    true
+
+trimSessionPivots() =>
+    while array.size(sessionPivotOrder) > sessionLevelsToKeepInput
+        int oldSessionId = array.pop(sessionPivotOrder)
+        deleteOldestSessionPivot(oldSessionId)
+    true
+
+method manageSessionPivot(
+     sessionPivot this,
+     simple int sessionId,
+     simple bool enabled,
+     simple string sessionName,
+     simple string highLabelText,
+     simple string lowLabelText,
+     simple string sessionTime,
+     simple color sessionColor
+) =>
+    if timeframeAllowed and enabled
+        bool inSession = not na(time("", sessionTime, timezoneInput))
+        bool inSessionPrev = not na(time("", sessionTime, timezoneInput, bars_back = 1))
+        bool sessionStarted = inSession and not inSessionPrev
+        bool sessionEnded = not inSession and inSessionPrev
+        color boxColor = color.new(sessionColor, boxTransparencyInput)
+        color boxTextColor = color.new(textColorInput, textTransparencyInput)
+        color pivotLineColor = color.new(sessionColor, sessionLevelTransparencyInput)
+        color pivotLabelColor = color.new(sessionColor, 100)
+        string boxLabelText = displayTextInput ? sessionName : ""
+
+        if sessionStarted
+            this.sessionActive := true
+            this.activeHigh := high
+            this.activeLow := low
+            this.activeHighTime := time
+            this.activeLowTime := time
+            this.activeRightTime := time
+
+            if showBoxesInput
+                box newBox = box.new(
+                     left = time,
+                     top = high,
+                     right = time,
+                     bottom = low,
+                     xloc = xloc.bar_time,
+                     border_color = boxColor,
+                     border_width = 1,
+                     border_style = line.style_solid,
+                     bgcolor = boxColor,
+                     text = boxLabelText,
+                     text_color = boxTextColor,
+                     text_size = labelSize,
+                     text_halign = text.align_center,
+                     text_valign = labelVerticalAlign,
+                     force_overlay = true
+                )
+                array.unshift(this.boxes, newBox)
+                array.unshift(sessionBoxOrder, sessionId)
+                trimSessionBoxes()
+
+        if inSession and showBoxesInput and array.size(this.boxes) > 0
+            box activeBox = array.get(this.boxes, 0)
+            activeBox.set_right(time)
+            activeBox.set_top(math.max(activeBox.get_top(), high))
+            activeBox.set_bottom(math.min(activeBox.get_bottom(), low))
+            activeBox.set_bgcolor(boxColor)
+            activeBox.set_border_color(boxColor)
+            activeBox.set_text(boxLabelText)
+            activeBox.set_text_color(boxTextColor)
+            activeBox.set_text_size(labelSize)
+            activeBox.set_text_valign(labelVerticalAlign)
+
+        if inSession and this.sessionActive
+            this.activeRightTime := time
+
+            if high > this.activeHigh
+                this.activeHigh := high
+                this.activeHighTime := time
+
+            if low < this.activeLow
+                this.activeLow := low
+                this.activeLowTime := time
+
+        if sessionEnded and this.sessionActive
+            if showSessionLevelsInput and not na(this.activeHigh) and not na(this.activeLow)
+                int pivotStartTime = this.activeRightTime
+                int hiLabelTime = sessionLevelRightSide ? time : this.activeHighTime
+                int loLabelTime = sessionLevelRightSide ? time : this.activeLowTime
+                line newHiLine = line.new(pivotStartTime, this.activeHigh, time, this.activeHigh, xloc = xloc.bar_time, style = sessionLevelStyle, color = pivotLineColor, width = sessionLevelLineWidthInput)
+                line newLoLine = line.new(pivotStartTime, this.activeLow, time, this.activeLow, xloc = xloc.bar_time, style = sessionLevelStyle, color = pivotLineColor, width = sessionLevelLineWidthInput)
+                label newHiLabel = label(na)
+                label newLoLabel = label(na)
+
+                if displaySessionLevelTextInput
+                    newHiLabel := label.new(hiLabelTime, this.activeHigh, highLabelText, xloc = xloc.bar_time, style = sessionLevelRightSide ? label.style_label_left : label.style_label_down, color = pivotLabelColor, textcolor = textColorInput, size = labelSize)
+                    newLoLabel := label.new(loLabelTime, this.activeLow, lowLabelText, xloc = xloc.bar_time, style = sessionLevelRightSide ? label.style_label_left : label.style_label_up, color = pivotLabelColor, textcolor = textColorInput, size = labelSize)
+
+                array.unshift(this.hiLines, newHiLine)
+                array.unshift(this.loLines, newLoLine)
+                array.unshift(this.hiLabels, newHiLabel)
+                array.unshift(this.loLabels, newLoLabel)
+                array.unshift(this.hiValid, true)
+                array.unshift(this.loValid, true)
+                array.unshift(sessionPivotOrder, sessionId)
+                trimSessionPivots()
+
+            this.sessionActive := false
+            this.activeHigh := na
+            this.activeLow := na
+            this.activeHighTime := na
+            this.activeLowTime := na
+            this.activeRightTime := na
+
+        if showSessionLevelsInput and array.size(this.hiLines) > 0
+            int pivotCount = array.size(this.hiLines)
+            for i = 0 to pivotCount - 1
+                line pivotHiLine = array.get(this.hiLines, i)
+                line pivotLoLine = array.get(this.loLines, i)
+                label pivotHiLabel = array.get(this.hiLabels, i)
+                label pivotLoLabel = array.get(this.loLabels, i)
+                bool hiCanExtend = array.get(this.hiValid, i)
+                bool loCanExtend = array.get(this.loValid, i)
+
+                if hiCanExtend
+                    pivotHiLine.set_x2(time)
+                    pivotHiLine.set_color(pivotLineColor)
+                    pivotHiLine.set_style(sessionLevelStyle)
+                    pivotHiLine.set_width(sessionLevelLineWidthInput)
+
+                    if displaySessionLevelTextInput and not na(pivotHiLabel)
+                        if sessionLevelRightSide
+                            pivotHiLabel.set_x(time)
+                        pivotHiLabel.set_text(highLabelText)
+                        pivotHiLabel.set_textcolor(textColorInput)
+                        pivotHiLabel.set_color(pivotLabelColor)
+                        pivotHiLabel.set_style(sessionLevelRightSide ? label.style_label_left : label.style_label_down)
+                        pivotHiLabel.set_size(labelSize)
+
+                    if not sessionLevelsPastMitigation and high > pivotHiLine.get_y1()
+                        array.set(this.hiValid, i, false)
+                    else if sessionLevelCutoffReached
+                        array.set(this.hiValid, i, false)
+
+                if loCanExtend
+                    pivotLoLine.set_x2(time)
+                    pivotLoLine.set_color(pivotLineColor)
+                    pivotLoLine.set_style(sessionLevelStyle)
+                    pivotLoLine.set_width(sessionLevelLineWidthInput)
+
+                    if displaySessionLevelTextInput and not na(pivotLoLabel)
+                        if sessionLevelRightSide
+                            pivotLoLabel.set_x(time)
+                        pivotLoLabel.set_text(lowLabelText)
+                        pivotLoLabel.set_textcolor(textColorInput)
+                        pivotLoLabel.set_color(pivotLabelColor)
+                        pivotLoLabel.set_style(sessionLevelRightSide ? label.style_label_left : label.style_label_up)
+                        pivotLoLabel.set_size(labelSize)
+
+                    if not sessionLevelsPastMitigation and low < pivotLoLine.get_y1()
+                        array.set(this.loValid, i, false)
+                    else if sessionLevelCutoffReached
+                        array.set(this.loValid, i, false)
+    true
+
+updatePreviousLevel(
+     simple int slot,
+     bool enabled,
+     bool resetLine,
+     float level,
+     simple string levelName,
+     simple color baseColor,
+     simple string lineStyle,
+     simple int lineWidth,
+     simple int lineTransparency,
+     simple bool displayLabel,
+     simple int labelOffset,
+     simple string textSize,
+     array<line> lineStore,
+     array<label> labelStore
+) =>
+    line levelLine = array.get(lineStore, slot)
+    label levelLabel = array.get(labelStore, slot)
+    color levelColor = color.new(baseColor, lineTransparency)
+    int labelX = bar_index + labelOffset
+
+    if resetLine and not na(levelLine)
+        line.delete(levelLine)
+        levelLine := line(na)
+        if not na(levelLabel)
+            label.delete(levelLabel)
+            levelLabel := label(na)
+
+    if enabled and not na(level)
+        if na(levelLine)
+            levelLine := line.new(bar_index, level, labelX, level, xloc = xloc.bar_index, extend = extend.right, color = levelColor, style = lineStyle, width = lineWidth)
+        else
+            line.set_y1(levelLine, level)
+            line.set_y2(levelLine, level)
+            line.set_x2(levelLine, labelX)
+            line.set_color(levelLine, levelColor)
+            line.set_style(levelLine, lineStyle)
+            line.set_width(levelLine, lineWidth)
+
+        if displayLabel
+            if na(levelLabel)
+                levelLabel := label.new(labelX, level, levelName, xloc = xloc.bar_index, style = label.style_label_left, color = color.new(baseColor, 100), textcolor = levelColor, size = textSize)
+            else
+                label.set_xy(levelLabel, labelX, level)
+                label.set_text(levelLabel, levelName)
+                label.set_textcolor(levelLabel, levelColor)
+                label.set_size(levelLabel, textSize)
+        else if not na(levelLabel)
+            label.delete(levelLabel)
+            levelLabel := label(na)
+    else
+        if not na(levelLine)
+            line.delete(levelLine)
+            levelLine := line(na)
+        if not na(levelLabel)
+            label.delete(levelLabel)
+            levelLabel := label(na)
+
+    array.set(lineStore, slot, levelLine)
+    array.set(labelStore, slot, levelLabel)
+
+    true
+
+asiaSessionState.manageSessionPivot(SESSION_ASIA, showAsiaInput, asiaNameInput, "AS.H", "AS.L", asiaSessionInput, asiaColorInput)
+londonSessionState.manageSessionPivot(SESSION_LONDON, showLondonInput, londonNameInput, "LO.H", "LO.L", londonSessionInput, londonColorInput)
+newYorkAmSessionState.manageSessionPivot(SESSION_NY_AM, showNewYorkAmInput, newYorkAmNameInput, "NYAM.H", "NYAM.L", newYorkAmSessionInput, newYorkAmColorInput)
+newYorkLunchSessionState.manageSessionPivot(SESSION_NY_LUNCH, showNewYorkLunchInput, newYorkLunchNameInput, "NYL.H", "NYL.L", newYorkLunchSessionInput, newYorkLunchColorInput)
+newYorkPmSessionState.manageSessionPivot(SESSION_NY_PM, showNewYorkPmInput, newYorkPmNameInput, "NYPM.H", "NYPM.L", newYorkPmSessionInput, newYorkPmColorInput)
+
+updatePreviousLevel(PREV_PDH, showPreviousDayInput, newDay, previousDayHigh, "PDH", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
+updatePreviousLevel(PREV_PDL, showPreviousDayInput, newDay, previousDayLow, "PDL", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
+updatePreviousLevel(PREV_PWH, showPreviousWeekInput, newWeek, previousWeekHigh, "PWH", previousWeekColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
+updatePreviousLevel(PREV_PWL, showPreviousWeekInput, newWeek, previousWeekLow, "PWL", previousWeekColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
+updatePreviousLevel(PREV_PMH, showPreviousMonthInput, newMonth, previousMonthHigh, "PMH", previousMonthColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
+updatePreviousLevel(PREV_PML, showPreviousMonthInput, newMonth, previousMonthLow, "PML", previousMonthColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
