@@ -5,6 +5,7 @@ const string GROUP_GENERAL = "General"
 const string GROUP_KILLZONES = "Killzones"
 const string GROUP_SESSION_LEVELS = "Session High/Low"
 const string GROUP_PREVIOUS_LEVELS = "Previous High/Low"
+const string GROUP_NY_AM_FVG = "NY AM First FVG"
 
 string timeframeLimitInput = input.timeframe("30", "Timeframe limit", group = GROUP_GENERAL)
 string timezoneInput = input.string("America/New_York", "Timezone", group = GROUP_GENERAL, tooltip = "Use an IANA timezone such as America/New_York, UTC, or Asia/Bangkok.")
@@ -68,6 +69,14 @@ int previousLevelLineWidthInput = input.int(1, "Line width", minval = 1, maxval 
 int previousLevelTransparencyInput = input.int(0, "Line transparency", minval = 0, maxval = 100, group = GROUP_PREVIOUS_LEVELS)
 int previousLabelOffsetInput = input.int(2, "Label offset", minval = 0, maxval = 50, group = GROUP_PREVIOUS_LEVELS)
 
+bool showNyAmFirstFvgInput = input.bool(true, "Show first NY AM FVG", group = GROUP_NY_AM_FVG)
+bool displayNyAmFirstFvgLabelInput = input.bool(true, "Display label", group = GROUP_NY_AM_FVG)
+string nyAmFirstFvgExtendModeInput = input.string("Until Mitigated", "Extend FVG", options = ["Until Mitigated", "Past Mitigation"], group = GROUP_NY_AM_FVG)
+color nyAmFirstFvgBullColorInput = input.color(color.rgb(16, 185, 129), "Bullish color", group = GROUP_NY_AM_FVG)
+color nyAmFirstFvgBearColorInput = input.color(color.rgb(239, 68, 68), "Bearish color", group = GROUP_NY_AM_FVG)
+int nyAmFirstFvgTransparencyInput = input.int(80, "Box transparency", minval = 0, maxval = 100, group = GROUP_NY_AM_FVG)
+int nyAmFirstFvgToKeepInput = input.int(40, "FVGs to keep", minval = 5, maxval = 200, group = GROUP_NY_AM_FVG)
+
 const int SESSION_ASIA = 0
 const int SESSION_LONDON = 1
 const int SESSION_NY_AM = 2
@@ -109,6 +118,13 @@ var array<line> previousLevelLines = array.new<line>(6, line(na))
 var array<label> previousLevelLabels = array.new<label>(6, label(na))
 var array<bool> previousLevelValid = array.new<bool>(6, true)
 
+var array<box> nyAmFirstFvgBoxes = array.new<box>()
+var array<label> nyAmFirstFvgLabels = array.new<label>()
+var array<bool> nyAmFirstFvgValid = array.new<bool>()
+var array<bool> nyAmFirstFvgBullish = array.new<bool>()
+var array<int> nyAmFirstFvgCreatedTimes = array.new<int>()
+var array<bool> nyAmFirstFvgCapturedState = array.new<bool>(1, false)
+
 string labelSize = switch labelSizeInput
     "Tiny" => size.tiny
     "Small" => size.small
@@ -134,6 +150,7 @@ bool timeframeAllowed = timeframe.isintraday and timeframe.in_seconds() <= timef
 bool sessionLevelRightSide = sessionLevelLabelSideInput == "Right Side"
 bool sessionLevelsPastMitigation = sessionLevelExtendModeInput == "Past Mitigation"
 bool previousLevelsPastMitigation = previousLevelExtendModeInput == "Past Mitigation"
+bool nyAmFirstFvgPastMitigation = nyAmFirstFvgExtendModeInput == "Past Mitigation"
 bool sessionLevelCutoffReached = useSessionLevelCutoffInput and not na(time("", sessionLevelCutoffInput, timezoneInput))
 
 float previousDayHigh = request.security(syminfo.tickerid, "D", high[1], barmerge.gaps_off, barmerge.lookahead_on)
@@ -222,6 +239,20 @@ trimSessionPivots() =>
     while array.size(sessionPivotOrder) > sessionLevelsToKeepInput
         int oldSessionId = array.pop(sessionPivotOrder)
         deleteOldestSessionPivot(oldSessionId)
+    true
+
+trimNyAmFirstFvgs() =>
+    while array.size(nyAmFirstFvgBoxes) > nyAmFirstFvgToKeepInput
+        box oldBox = array.pop(nyAmFirstFvgBoxes)
+        label oldLabel = array.pop(nyAmFirstFvgLabels)
+        array.pop(nyAmFirstFvgValid)
+        array.pop(nyAmFirstFvgBullish)
+        array.pop(nyAmFirstFvgCreatedTimes)
+
+        if not na(oldBox)
+            box.delete(oldBox)
+        if not na(oldLabel)
+            label.delete(oldLabel)
     true
 
 method manageSessionPivot(
@@ -463,11 +494,94 @@ updatePreviousLevel(
 
     true
 
+manageNyAmFirstFvg() =>
+    bool nyAmFirstFvgCaptured = array.get(nyAmFirstFvgCapturedState, 0)
+    bool inNyAm = timeframeAllowed and not na(time("", newYorkAmSessionInput, timezoneInput))
+    bool inNyAmPrev = timeframeAllowed and not na(time("", newYorkAmSessionInput, timezoneInput, bars_back = 1))
+    bool inNyAmPrev2 = timeframeAllowed and not na(time("", newYorkAmSessionInput, timezoneInput, bars_back = 2))
+    bool nyAmStarted = inNyAm and not inNyAmPrev
+
+    if nyAmStarted
+        nyAmFirstFvgCaptured := false
+        array.set(nyAmFirstFvgCapturedState, 0, false)
+
+    if timeframeAllowed and showNyAmFirstFvgInput and inNyAm and inNyAmPrev and inNyAmPrev2 and not nyAmFirstFvgCaptured and bar_index >= 2
+        bool bullishFvg = low > high[2]
+        bool bearishFvg = high < low[2]
+
+        if bullishFvg or bearishFvg
+            float fvgTop = bullishFvg ? low : low[2]
+            float fvgBottom = bullishFvg ? high[2] : high
+            color fvgBaseColor = bullishFvg ? nyAmFirstFvgBullColorInput : nyAmFirstFvgBearColorInput
+            color fvgBoxColor = color.new(fvgBaseColor, nyAmFirstFvgTransparencyInput)
+            color fvgLabelColor = color.new(fvgBaseColor, 100)
+            string fvgLabelText = bullishFvg ? "1st NYAM Bull FVG" : "1st NYAM Bear FVG"
+            float labelPrice = (fvgTop + fvgBottom) / 2.0
+            box newFvgBox = box.new(time[2], fvgTop, time, fvgBottom, xloc = xloc.bar_time, border_color = fvgBaseColor, border_width = 1, bgcolor = fvgBoxColor, force_overlay = true)
+            label newFvgLabel = label(na)
+
+            if displayNyAmFirstFvgLabelInput
+                newFvgLabel := label.new(time, labelPrice, fvgLabelText, xloc = xloc.bar_time, style = label.style_label_left, color = fvgLabelColor, textcolor = fvgBaseColor, size = labelSize)
+
+            array.unshift(nyAmFirstFvgBoxes, newFvgBox)
+            array.unshift(nyAmFirstFvgLabels, newFvgLabel)
+            array.unshift(nyAmFirstFvgValid, true)
+            array.unshift(nyAmFirstFvgBullish, bullishFvg)
+            array.unshift(nyAmFirstFvgCreatedTimes, time)
+            nyAmFirstFvgCaptured := true
+            array.set(nyAmFirstFvgCapturedState, 0, true)
+            trimNyAmFirstFvgs()
+
+    if showNyAmFirstFvgInput and array.size(nyAmFirstFvgBoxes) > 0
+        int fvgCount = array.size(nyAmFirstFvgBoxes)
+        for i = 0 to fvgCount - 1
+            box fvgBox = array.get(nyAmFirstFvgBoxes, i)
+            label fvgLabel = array.get(nyAmFirstFvgLabels, i)
+            bool fvgCanExtend = array.get(nyAmFirstFvgValid, i)
+            bool fvgIsBullish = array.get(nyAmFirstFvgBullish, i)
+            int fvgCreatedTime = array.get(nyAmFirstFvgCreatedTimes, i)
+            color fvgBaseColor = fvgIsBullish ? nyAmFirstFvgBullColorInput : nyAmFirstFvgBearColorInput
+            color fvgBoxColor = color.new(fvgBaseColor, nyAmFirstFvgTransparencyInput)
+            color fvgLabelColor = color.new(fvgBaseColor, 100)
+            string fvgLabelText = fvgIsBullish ? "1st NYAM Bull FVG" : "1st NYAM Bear FVG"
+            float labelPrice = (fvgBox.get_top() + fvgBox.get_bottom()) / 2.0
+
+            box.set_bgcolor(fvgBox, fvgBoxColor)
+            box.set_border_color(fvgBox, fvgBaseColor)
+
+            if fvgCanExtend
+                fvgBox.set_right(time)
+
+            if displayNyAmFirstFvgLabelInput
+                if na(fvgLabel)
+                    fvgLabel := label.new(fvgBox.get_right(), labelPrice, fvgLabelText, xloc = xloc.bar_time, style = label.style_label_left, color = fvgLabelColor, textcolor = fvgBaseColor, size = labelSize)
+                else
+                    if fvgCanExtend
+                        label.set_x(fvgLabel, fvgBox.get_right())
+                    label.set_y(fvgLabel, labelPrice)
+                    label.set_text(fvgLabel, fvgLabelText)
+                    label.set_textcolor(fvgLabel, fvgBaseColor)
+                    label.set_color(fvgLabel, fvgLabelColor)
+                    label.set_size(fvgLabel, labelSize)
+            else if not na(fvgLabel)
+                label.delete(fvgLabel)
+                fvgLabel := label(na)
+
+            if fvgCanExtend and not nyAmFirstFvgPastMitigation and time > fvgCreatedTime
+                bool fvgMitigated = fvgIsBullish ? low <= fvgBox.get_top() : high >= fvgBox.get_bottom()
+                if fvgMitigated
+                    array.set(nyAmFirstFvgValid, i, false)
+
+            array.set(nyAmFirstFvgLabels, i, fvgLabel)
+
+    true
+
 asiaSessionState.manageSessionPivot(SESSION_ASIA, showAsiaInput, asiaNameInput, "AS.H", "AS.L", asiaSessionInput, asiaColorInput)
 londonSessionState.manageSessionPivot(SESSION_LONDON, showLondonInput, londonNameInput, "LO.H", "LO.L", londonSessionInput, londonColorInput)
 newYorkAmSessionState.manageSessionPivot(SESSION_NY_AM, showNewYorkAmInput, newYorkAmNameInput, "NYAM.H", "NYAM.L", newYorkAmSessionInput, newYorkAmColorInput)
 newYorkLunchSessionState.manageSessionPivot(SESSION_NY_LUNCH, showNewYorkLunchInput, newYorkLunchNameInput, "NYL.H", "NYL.L", newYorkLunchSessionInput, newYorkLunchColorInput)
 newYorkPmSessionState.manageSessionPivot(SESSION_NY_PM, showNewYorkPmInput, newYorkPmNameInput, "NYPM.H", "NYPM.L", newYorkPmSessionInput, newYorkPmColorInput)
+manageNyAmFirstFvg()
 
 updatePreviousLevel(PREV_PDH, showPreviousDayInput, newDay, previousDayHigh, currentDayStartTime, "PDH", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
 updatePreviousLevel(PREV_PDL, showPreviousDayInput, newDay, previousDayLow, currentDayStartTime, "PDL", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
