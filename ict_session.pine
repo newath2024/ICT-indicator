@@ -63,6 +63,7 @@ bool showPreviousMonthInput = input.bool(true, "PMH/PML", inline = "previousMont
 color previousMonthColorInput = input.color(color.rgb(75, 85, 99), "", inline = "previousMonth", group = GROUP_PREVIOUS_LEVELS)
 bool displayPreviousLevelTextInput = input.bool(true, "Display labels", inline = "previousDisplay", group = GROUP_PREVIOUS_LEVELS)
 string previousLevelStyleInput = input.string("Dashed", "Style", options = ["Solid", "Dashed", "Dotted"], inline = "previousDisplay", group = GROUP_PREVIOUS_LEVELS)
+string previousLevelExtendModeInput = input.string("Until Mitigated", "Extend levels", options = ["Until Mitigated", "Past Mitigation"], group = GROUP_PREVIOUS_LEVELS)
 int previousLevelLineWidthInput = input.int(1, "Line width", minval = 1, maxval = 5, group = GROUP_PREVIOUS_LEVELS)
 int previousLevelTransparencyInput = input.int(0, "Line transparency", minval = 0, maxval = 100, group = GROUP_PREVIOUS_LEVELS)
 int previousLabelOffsetInput = input.int(2, "Label offset", minval = 0, maxval = 50, group = GROUP_PREVIOUS_LEVELS)
@@ -106,6 +107,7 @@ var array<int> sessionPivotOrder = array.new<int>()
 
 var array<line> previousLevelLines = array.new<line>(6, line(na))
 var array<label> previousLevelLabels = array.new<label>(6, label(na))
+var array<bool> previousLevelValid = array.new<bool>(6, true)
 
 string labelSize = switch labelSizeInput
     "Tiny" => size.tiny
@@ -131,6 +133,7 @@ string previousLevelStyle = switch previousLevelStyleInput
 bool timeframeAllowed = timeframe.isintraday and timeframe.in_seconds() <= timeframe.in_seconds(timeframeLimitInput)
 bool sessionLevelRightSide = sessionLevelLabelSideInput == "Right Side"
 bool sessionLevelsPastMitigation = sessionLevelExtendModeInput == "Past Mitigation"
+bool previousLevelsPastMitigation = previousLevelExtendModeInput == "Past Mitigation"
 bool sessionLevelCutoffReached = useSessionLevelCutoffInput and not na(time("", sessionLevelCutoffInput, timezoneInput))
 
 float previousDayHigh = request.security(syminfo.tickerid, "D", high[1], barmerge.gaps_off, barmerge.lookahead_on)
@@ -143,6 +146,19 @@ float previousMonthLow = request.security(syminfo.tickerid, "M", low[1], barmerg
 bool newDay = timeframe.change("D")
 bool newWeek = timeframe.change("W")
 bool newMonth = timeframe.change("M")
+
+var int currentDayStartBar = na
+var int currentWeekStartBar = na
+var int currentMonthStartBar = na
+
+if barstate.isfirst or newDay
+    currentDayStartBar := bar_index
+
+if barstate.isfirst or newWeek
+    currentWeekStartBar := bar_index
+
+if barstate.isfirst or newMonth
+    currentMonthStartBar := bar_index
 
 method deleteOldestBox(sessionPivot this) =>
     if array.size(this.boxes) > 0
@@ -368,6 +384,7 @@ updatePreviousLevel(
      bool enabled,
      bool resetLine,
      float level,
+     int lineStartX,
      simple string levelName,
      simple color baseColor,
      simple string lineStyle,
@@ -376,11 +393,15 @@ updatePreviousLevel(
      simple bool displayLabel,
      simple int labelOffset,
      simple string textSize,
+     simple bool extendPastMitigation,
      array<line> lineStore,
-     array<label> labelStore
+     array<label> labelStore,
+     array<bool> validStore
 ) =>
     line levelLine = array.get(lineStore, slot)
     label levelLabel = array.get(labelStore, slot)
+    bool levelCanExtend = array.get(validStore, slot)
+    bool isHighLevel = slot == PREV_PDH or slot == PREV_PWH or slot == PREV_PMH
     color levelColor = color.new(baseColor, lineTransparency)
     int labelX = bar_index + labelOffset
 
@@ -390,29 +411,42 @@ updatePreviousLevel(
         if not na(levelLabel)
             label.delete(levelLabel)
             levelLabel := label(na)
+        levelCanExtend := true
 
     if enabled and not na(level)
         if na(levelLine)
-            levelLine := line.new(bar_index, level, labelX, level, xloc = xloc.bar_index, extend = extend.right, color = levelColor, style = lineStyle, width = lineWidth)
+            levelLine := line.new(lineStartX, level, labelX, level, xloc = xloc.bar_index, extend = extend.none, color = levelColor, style = lineStyle, width = lineWidth)
+            levelCanExtend := true
         else
             line.set_y1(levelLine, level)
             line.set_y2(levelLine, level)
-            line.set_x2(levelLine, labelX)
             line.set_color(levelLine, levelColor)
             line.set_style(levelLine, lineStyle)
             line.set_width(levelLine, lineWidth)
 
+        if levelCanExtend
+            line.set_x1(levelLine, lineStartX)
+            line.set_x2(levelLine, labelX)
+
         if displayLabel
+            int activeLabelX = levelCanExtend ? labelX : levelLine.get_x2()
             if na(levelLabel)
-                levelLabel := label.new(labelX, level, levelName, xloc = xloc.bar_index, style = label.style_label_left, color = color.new(baseColor, 100), textcolor = levelColor, size = textSize)
+                levelLabel := label.new(activeLabelX, level, levelName, xloc = xloc.bar_index, style = label.style_label_left, color = color.new(baseColor, 100), textcolor = levelColor, size = textSize)
             else
-                label.set_xy(levelLabel, labelX, level)
+                label.set_xy(levelLabel, activeLabelX, level)
                 label.set_text(levelLabel, levelName)
                 label.set_textcolor(levelLabel, levelColor)
+                label.set_color(levelLabel, color.new(baseColor, 100))
                 label.set_size(levelLabel, textSize)
         else if not na(levelLabel)
             label.delete(levelLabel)
             levelLabel := label(na)
+
+        if levelCanExtend and not extendPastMitigation
+            if isHighLevel and high > level
+                levelCanExtend := false
+            else if not isHighLevel and low < level
+                levelCanExtend := false
     else
         if not na(levelLine)
             line.delete(levelLine)
@@ -420,9 +454,11 @@ updatePreviousLevel(
         if not na(levelLabel)
             label.delete(levelLabel)
             levelLabel := label(na)
+        levelCanExtend := true
 
     array.set(lineStore, slot, levelLine)
     array.set(labelStore, slot, levelLabel)
+    array.set(validStore, slot, levelCanExtend)
 
     true
 
@@ -432,9 +468,9 @@ newYorkAmSessionState.manageSessionPivot(SESSION_NY_AM, showNewYorkAmInput, newY
 newYorkLunchSessionState.manageSessionPivot(SESSION_NY_LUNCH, showNewYorkLunchInput, newYorkLunchNameInput, "NYL.H", "NYL.L", newYorkLunchSessionInput, newYorkLunchColorInput)
 newYorkPmSessionState.manageSessionPivot(SESSION_NY_PM, showNewYorkPmInput, newYorkPmNameInput, "NYPM.H", "NYPM.L", newYorkPmSessionInput, newYorkPmColorInput)
 
-updatePreviousLevel(PREV_PDH, showPreviousDayInput, newDay, previousDayHigh, "PDH", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
-updatePreviousLevel(PREV_PDL, showPreviousDayInput, newDay, previousDayLow, "PDL", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
-updatePreviousLevel(PREV_PWH, showPreviousWeekInput, newWeek, previousWeekHigh, "PWH", previousWeekColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
-updatePreviousLevel(PREV_PWL, showPreviousWeekInput, newWeek, previousWeekLow, "PWL", previousWeekColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
-updatePreviousLevel(PREV_PMH, showPreviousMonthInput, newMonth, previousMonthHigh, "PMH", previousMonthColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
-updatePreviousLevel(PREV_PML, showPreviousMonthInput, newMonth, previousMonthLow, "PML", previousMonthColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelLines, previousLevelLabels)
+updatePreviousLevel(PREV_PDH, showPreviousDayInput, newDay, previousDayHigh, currentDayStartBar, "PDH", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
+updatePreviousLevel(PREV_PDL, showPreviousDayInput, newDay, previousDayLow, currentDayStartBar, "PDL", previousDayColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
+updatePreviousLevel(PREV_PWH, showPreviousWeekInput, newWeek, previousWeekHigh, currentWeekStartBar, "PWH", previousWeekColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
+updatePreviousLevel(PREV_PWL, showPreviousWeekInput, newWeek, previousWeekLow, currentWeekStartBar, "PWL", previousWeekColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
+updatePreviousLevel(PREV_PMH, showPreviousMonthInput, newMonth, previousMonthHigh, currentMonthStartBar, "PMH", previousMonthColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
+updatePreviousLevel(PREV_PML, showPreviousMonthInput, newMonth, previousMonthLow, currentMonthStartBar, "PML", previousMonthColorInput, previousLevelStyle, previousLevelLineWidthInput, previousLevelTransparencyInput, displayPreviousLevelTextInput, previousLabelOffsetInput, labelSize, previousLevelsPastMitigation, previousLevelLines, previousLevelLabels, previousLevelValid)
